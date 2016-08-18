@@ -1,0 +1,6 @@
+[package]
+name = "persistent-rope"
+version = "0.1.0"
+authors = ["raiker <josh.weberruss@monash.edu>"]
+
+[dependencies]
