@@ -18,8 +18,38 @@ pub struct TreeNode<K,V> where K: Ord+Copy, V: Copy {
 	right: Rc<Option<TreeNode<K,V>>>
 }
 
+trait HasColour {
+	fn is_red(&self) -> bool;
+}
+
+impl<K,V> HasColour for Option<TreeNode<K,V>> where K: Ord+Copy, V: Copy {
+	fn is_red(&self) -> bool {
+		match self {
+			&None => false,
+			&Some(ref node) => {
+				node.is_red
+			}
+		}
+	}
+}
+
+impl<K,V> HasColour for TreeNode<K,V> where K: Ord+Copy, V: Copy {
+	fn is_red(&self) -> bool {
+		self.is_red
+	}
+}
+
+enum InsertionResultRecursion<K,V> where K: Ord+Copy, V: Copy {
+	///Key already present
+	Failure,
+	///No additional steps necessary
+	Standard(Rc<Option<TreeNode<K,V>>>),
+	///Sibling recolouring necessary
+	SiblingRecolouring(Rc<Option<TreeNode<K,V>>>),
+}
+
 impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
-	pub fn new() {
+	pub fn new() -> Tree<K,V> {
 		Tree {root: Rc::new(None)}
 	}
 
@@ -60,14 +90,37 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 	}*/
 
 	pub fn insert(&self, key: K, val: V) -> Option<Tree<K,V>> {
-		Self::rec_insert(key, val, &self.root, None).map(|r| Tree {root: r})
+		match Self::rec_insert(key, val, &self.root, None) {
+			InsertionResultRecursion::Failure => None,
+			InsertionResultRecursion::Standard(root) => {
+				if root.is_red() {
+					//red
+					match root.deref() {
+						&Some(ref old_node) => {
+							Some(Tree {root: Rc::new(Some(TreeNode {
+								is_red: false,
+								key: old_node.key,
+								val: old_node.val,
+								left: old_node.left.clone(),
+								right: old_node.right.clone()
+							}))})
+						},
+						&None => panic!("assertion failure")
+					}
+				} else {
+					//black
+					Some(Tree {root: root})
+				}
+			},
+			_ => panic!("Unexpected recursion result")
+		}
 	}
 
-	fn rec_insert(key: K, val: V, current: &Rc<Option<TreeNode<K,V>>>, parent: Option<&Rc<Option<TreeNode<K,V>>>>) -> Option<Rc<Option<TreeNode<K,V>>>>{
+	fn rec_insert(key: K, val: V, current: &Rc<Option<TreeNode<K,V>>>, parent: Option<&Rc<Option<TreeNode<K,V>>>>) -> InsertionResultRecursion<K,V>{
 		match current.deref() {
 			&None => {
 				//insert here
-				Some(Rc::new(Some(TreeNode{
+				InsertionResultRecursion::Standard(Rc::new(Some(TreeNode{
 					is_red: true,
 					key: key,
 					val: val,
@@ -78,30 +131,70 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 			&Some(ref node) => {
 				match key.cmp(&node.key) {
 					Ordering::Less => {
-						let new_left_child = Self::rec_insert(key, val, &node.left, Some(current));
-						new_left_child.map(|c| {
-							Rc::new(Some(TreeNode{
-								is_red: node.is_red,
-								key: node.key,
-								val: node.val,
-								left: c,
-								right: node.right.clone()
-							}))
-						})
+						match Self::rec_insert(key, val, &node.left, Some(current)) {
+							InsertionResultRecursion::Failure => InsertionResultRecursion::Failure,
+							InsertionResultRecursion::Standard(left_child) => {
+								if node.is_red() {
+									//red
+									assert!(parent.is_some()); //red nodes always have parents
+									if left_child.is_red() {
+										//conflict
+										//need to recolour self, parent and sibling
+										InsertionResultRecursion::SiblingRecolouring(Rc::new(Some(TreeNode{
+											is_red: false,
+											key: node.key,
+											val: node.val,
+											left: left_child,
+											right: node.right.clone()
+										})))
+									} else {
+										unimplemented!()
+									}
+								} else {
+									//black
+									InsertionResultRecursion::Standard(Rc::new(Some(TreeNode{
+										is_red: node.is_red,
+										key: node.key,
+										val: node.val,
+										left: left_child,
+										right: node.right.clone()
+									})))
+								}
+							},
+							InsertionResultRecursion::SiblingRecolouring(left_child) => {
+								assert!(!left_child.is_red());
+								assert!(node.right.is_red());
+								assert!(!node.is_red());
+
+								//clone and recolour the right child
+								let right_child = {
+									match node.right.deref() {
+										&Some(ref old_right_child) => Rc::new(Some(TreeNode{
+											is_red: false,
+											key: old_right_child.key,
+											val: old_right_child.val,
+											left: old_right_child.left.clone(),
+											right: old_right_child.right.clone()
+										})),
+										&None => panic!("assertion failure")
+									}
+								};
+
+								//clone and recolour self
+								InsertionResultRecursion::Standard(Rc::new(Some(TreeNode{
+									is_red: true,
+									key: node.key,
+									val: node.val,
+									left: left_child,
+									right: right_child
+								})))
+							}
+						}
 					},
 					Ordering::Greater => {
-						let new_right_child = Self::rec_insert(key, val, &node.right, Some(current));
-						new_right_child.map(|c| {
-							Rc::new(Some(TreeNode{
-								is_red: node.is_red,
-								key: node.key,
-								val: node.val,
-								left: node.left.clone(),
-								right: c
-							}))
-						})
+						unimplemented!()
 					},
-					Ordering::Equal => None
+					Ordering::Equal => InsertionResultRecursion::Failure
 				}
 			}
 		}
@@ -109,7 +202,7 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 }
 
 fn main() {
-    let tree = Some(TreeNode {
+    /*let tree = Some(TreeNode {
 		is_red: false,
 		key: 13,
 		val: (),
@@ -185,8 +278,18 @@ fn main() {
 		}))
 	}))};
 
-	let tree3 = tree2.insert(0, ());
+	let tree3 = tree2.insert(0, ()).unwrap();
 	println!("{:#?}", tree3);
+
+	let tree4 = Tree::new();
+	let tree5 = tree4.insert(0, ()).unwrap();
+	println!("{:#?}", tree5);*/
+
+	let tree = Tree::new().insert(13, ()).unwrap().insert(8, ()).unwrap().insert(17, ()).unwrap();
+	println!("{:#?}", tree);
+
+	let tree2 = tree.insert(1, ()).unwrap();
+	println!("{:#?}", tree2);
 }
 
 #[cfg(test)]
