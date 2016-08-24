@@ -159,20 +159,73 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 									InsertionResultRecursion::DoubleRedLeft(left_child)
 								} else {
 									//black
-									InsertionResultRecursion::Standard(Rc::new(Some(TreeNode{
-										is_red: node.is_red,
-										key: node.key,
-										val: node.val,
-										left: left_child,
-										right: node.right.clone()
-									})))
+									InsertionResultRecursion::Standard(node.recolour(node.is_red, left_child, node.right.clone()))
 								}
 							},
 							InsertionResultRecursion::DoubleRedLeft(left_grandchild) => {
-								unimplemented!()
+								assert!(!node.is_red());
+
+								if node.right.is_red() {
+									//     B (self)
+									//    / \
+									//   R   R
+									//  /
+									// R
+									
+									//recolour self and both children
+									let old_left = node.left.as_ref().as_ref().unwrap();
+									let old_right = node.right.as_ref().as_ref().unwrap();
+
+									let new_left = old_left.recolour(false, left_grandchild, old_left.right.clone());
+									let new_right = old_right.recolour(false, old_right.left.clone(), old_right.right.clone());
+
+									InsertionResultRecursion::Standard(node.recolour(true, new_left, new_right))
+								} else {
+									//     B (self)
+									//    / \
+									//   R   B
+									//  /
+									// R
+									
+									//reorder and recolour
+									let old_left = node.left.as_ref().as_ref().unwrap();
+									let new_right = node.recolour(true, old_left.right.clone(), node.right.clone());
+									InsertionResultRecursion::Standard(old_left.recolour(false, left_grandchild, new_right))
+								}
 							},
 							InsertionResultRecursion::DoubleRedRight(right_grandchild) => {
-								unimplemented!()
+								assert!(!node.is_red());
+
+								if node.right.is_red() {
+									//   B (self)
+									//  / \
+									// R   R
+									//  \
+									//   R
+									
+									// recolour self and both children
+									let old_left = node.left.as_ref().as_ref().unwrap();
+									let old_right = node.right.as_ref().as_ref().unwrap();
+
+									let new_left = old_left.recolour(false, old_left.left.clone(), right_grandchild);
+									let new_right = old_right.recolour(false, old_right.left.clone(), old_right.right.clone());
+
+									InsertionResultRecursion::Standard(node.recolour(true, new_left, new_right))
+								} else {
+									//   B (self)
+									//  / \
+									// R   B
+									//  \
+									//   R
+									
+									// reorder and recolour
+									let old_left = node.left.as_ref().as_ref().unwrap();
+									let old_grandchild = right_grandchild.as_ref().as_ref().unwrap();
+									
+									let new_left = old_left.recolour(true, old_left.left.clone(), old_grandchild.left.clone());
+									let new_right = node.recolour(true, old_grandchild.right.clone(), node.right.clone());
+									InsertionResultRecursion::Standard(old_grandchild.recolour(false, new_left, new_right))
+								}
 							}
 						}
 					},
