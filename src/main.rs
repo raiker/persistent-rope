@@ -1,6 +1,7 @@
 use std::rc::{Rc};
 use std::cmp::{Ord, Ordering};
-use std::ops::Deref;
+
+fn ptr_eq<T>(a: *const T, b: *const T) -> bool { a == b }
 
 //Red-Black Tree
 
@@ -33,6 +34,18 @@ impl<K,V> HasColour for Option<TreeNode<K,V>> where K: Ord+Copy, V: Copy {
 	}
 }
 
+impl<K,V> TreeNode<K,V> where K: Ord+Copy, V: Copy {
+	fn recolour(&self, is_red: bool, left: Rc<Option<TreeNode<K,V>>>, right: Rc<Option<TreeNode<K,V>>>) -> Rc<Option<TreeNode<K,V>>> {
+		Rc::new(Some(TreeNode{
+			is_red: is_red,
+			key: self.key,
+			val: self.val,
+			left: left,
+			right: right
+		}))
+	}
+}
+
 impl<K,V> HasColour for TreeNode<K,V> where K: Ord+Copy, V: Copy {
 	fn is_red(&self) -> bool {
 		self.is_red
@@ -44,8 +57,10 @@ enum InsertionResultRecursion<K,V> where K: Ord+Copy, V: Copy {
 	Failure,
 	///No additional steps necessary
 	Standard(Rc<Option<TreeNode<K,V>>>),
-	///Sibling recolouring necessary
-	SiblingRecolouring(Rc<Option<TreeNode<K,V>>>),
+	///Child is red, new grandchild on left also red
+	DoubleRedLeft(Rc<Option<TreeNode<K,V>>>),
+	///Child is red, new grandchild on right also red
+	DoubleRedRight(Rc<Option<TreeNode<K,V>>>),
 }
 
 impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
@@ -54,15 +69,15 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 	}
 
 	pub fn find(&self, search_key: K) -> Option<&V> {
-		let mut current = self.root.deref();
+		let mut current = self.root.as_ref();
 		
 		loop {
 			match current {
 				&None => return None,
 				&Some(ref node) => {
 					match search_key.cmp(&node.key) {
-						Ordering::Less => current = node.left.deref(),
-						Ordering::Greater => current = node.right.deref(),
+						Ordering::Less => current = node.left.as_ref(),
+						Ordering::Greater => current = node.right.as_ref(),
 						Ordering::Equal => return Some(&node.val)
 					}
 				}
@@ -71,8 +86,8 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 				&None => return None,
 				&Some(ref node) => {
 					match search_key.cmp(&node.key) {
-						Ordering::Less => current = node.left.deref(),
-						Ordering::Greater => current = node.right.deref(),
+						Ordering::Less => current = node.left.as_ref(),
+						Ordering::Greater => current = node.right.as_ref(),
 						Ordering::Equal => return Some(&node.val)
 					}
 				}
@@ -95,7 +110,7 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 			InsertionResultRecursion::Standard(root) => {
 				if root.is_red() {
 					//red
-					match root.deref() {
+					match root.as_ref() {
 						&Some(ref old_node) => {
 							Some(Tree {root: Rc::new(Some(TreeNode {
 								is_red: false,
@@ -116,8 +131,23 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 		}
 	}
 
+	fn sibling<'a>(current: &'a Rc<Option<TreeNode<K,V>>>, parent: &'a Rc<Option<TreeNode<K,V>>>) -> &'a Rc<Option<TreeNode<K,V>>> {
+		match parent.as_ref() {
+			&None => panic!("assertion failure"),
+			&Some(ref p) => {
+				if ptr_eq(p.left.as_ref(), current.as_ref()) {
+					&p.right
+				} else if ptr_eq(p.right.as_ref(), current.as_ref()) {
+					&p.left
+				} else {
+					panic!("assertion failure")
+				}
+			}
+		}
+	} 
+
 	fn rec_insert(key: K, val: V, current: &Rc<Option<TreeNode<K,V>>>, parent: Option<&Rc<Option<TreeNode<K,V>>>>) -> InsertionResultRecursion<K,V>{
-		match current.deref() {
+		match current.as_ref() {
 			&None => {
 				//insert here
 				InsertionResultRecursion::Standard(Rc::new(Some(TreeNode{
@@ -136,20 +166,7 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 							InsertionResultRecursion::Standard(left_child) => {
 								if node.is_red() {
 									//red
-									assert!(parent.is_some()); //red nodes always have parents
-									if left_child.is_red() {
-										//conflict
-										//need to recolour self, parent and sibling
-										InsertionResultRecursion::SiblingRecolouring(Rc::new(Some(TreeNode{
-											is_red: false,
-											key: node.key,
-											val: node.val,
-											left: left_child,
-											right: node.right.clone()
-										})))
-									} else {
-										unimplemented!()
-									}
+									InsertionResultRecursion::DoubleRedLeft(left_child)
 								} else {
 									//black
 									InsertionResultRecursion::Standard(Rc::new(Some(TreeNode{
@@ -161,38 +178,88 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 									})))
 								}
 							},
-							InsertionResultRecursion::SiblingRecolouring(left_child) => {
-								assert!(!left_child.is_red());
-								assert!(node.right.is_red());
-								assert!(!node.is_red());
-
-								//clone and recolour the right child
-								let right_child = {
-									match node.right.deref() {
-										&Some(ref old_right_child) => Rc::new(Some(TreeNode{
-											is_red: false,
-											key: old_right_child.key,
-											val: old_right_child.val,
-											left: old_right_child.left.clone(),
-											right: old_right_child.right.clone()
-										})),
-										&None => panic!("assertion failure")
-									}
-								};
-
-								//clone and recolour self
-								InsertionResultRecursion::Standard(Rc::new(Some(TreeNode{
-									is_red: true,
-									key: node.key,
-									val: node.val,
-									left: left_child,
-									right: right_child
-								})))
+							InsertionResultRecursion::DoubleRedLeft(left_grandchild) => {
+								unimplemented!()
+							},
+							InsertionResultRecursion::DoubleRedRight(right_grandchild) => {
+								unimplemented!()
 							}
 						}
 					},
 					Ordering::Greater => {
-						unimplemented!()
+						match Self::rec_insert(key, val, &node.right, Some(current)) {
+							InsertionResultRecursion::Failure => InsertionResultRecursion::Failure,
+							InsertionResultRecursion::Standard(right_child) => {
+								if node.is_red() {
+									//red
+									InsertionResultRecursion::DoubleRedRight(right_child)
+								} else {
+									//black
+									InsertionResultRecursion::Standard(Rc::new(Some(TreeNode{
+										is_red: node.is_red,
+										key: node.key,
+										val: node.val,
+										left: node.left.clone(),
+										right: right_child
+									})))
+								}
+							},
+							InsertionResultRecursion::DoubleRedLeft(left_grandchild) => {
+								assert!(!node.is_red());
+
+								if node.left.is_red() {
+									//   B (self)
+									//  / \
+									// R   R
+									//    /
+									//   R
+									
+									// recolour self and both children
+									let old_left = node.left.as_ref().as_ref().unwrap();
+									let old_right = node.right.as_ref().as_ref().unwrap();
+
+									let new_left = Rc::new(Some(TreeNode{
+										is_red: false,
+										key: old_left.key,
+										val: old_left.val,
+										left: old_left.left.clone(),
+										right: old_left.right.clone()
+									}));
+
+									let new_right = Rc::new(Some(TreeNode{
+										is_red: false,
+										key: old_right.key,
+										val: old_right.val,
+										left: left_grandchild,
+										right: old_right.right.clone()
+									}));
+
+									InsertionResultRecursion::Standard(Rc::new(Some(TreeNode{
+										is_red: true,
+										key: node.key,
+										val: node.val,
+										left: new_left,
+										right: new_right
+									})))
+								} else {
+									//   B (self)
+									//  / \
+									// B   R
+									//    /
+									//   R
+									
+									// reorder and recolour
+									let old_right = node.right.as_ref().as_ref().unwrap();
+									let old_grandchild = left_grandchild.as_ref().as_ref().unwrap();
+									let new_left = node.recolour(true, node.left.clone(), old_grandchild.left.clone());
+									let new_right = old_right.recolour(true, old_grandchild.right.clone(), old_right.right.clone());
+									InsertionResultRecursion::Standard(old_grandchild.recolour(false, new_left, new_right))
+								}
+							},
+							InsertionResultRecursion::DoubleRedRight(right_grandchild) => {
+								unimplemented!()
+							}
+						}
 					},
 					Ordering::Equal => InsertionResultRecursion::Failure
 				}
@@ -296,6 +363,7 @@ fn main() {
 mod tests {
 	use std::rc::Rc;
 	use super::*;
+	use super::HasColour;
 
 	#[test]
 	fn test_find(){
@@ -319,7 +387,356 @@ mod tests {
 	}
 
 	#[test]
-	fn test_insert(){
+	fn test_insert_case1(){
+		let start = Tree::new();
+		let test = start.insert(5, ()).unwrap();
+		//  5
+		assert_eq!(test.root.is_some(), true);
 
+		let test_root = test.root.as_ref().as_ref().unwrap();
+		assert_eq!(test_root.is_red(), false);
+		assert_eq!(test_root.key, 5);
+		assert_eq!(test_root.left.is_some(), false);
+		assert_eq!(test_root.right.is_some(), false);
+	}
+
+	#[test]
+	fn test_insert_case2_left() {
+		let start = Tree::new().insert(5, ()).unwrap();
+		let test = start.insert(4, ()).unwrap();
+		//    5
+		//   /
+		//  4
+		assert_eq!(test.root.is_some(), true);
+
+		let ref test_root = test.root.as_ref().as_ref().unwrap();
+		assert_eq!(test_root.is_red(), false);
+		assert_eq!(test_root.key, 5);
+		assert_eq!(test_root.left.is_some(), true);
+		assert_eq!(test_root.right.is_some(), false);
+
+		let ref test_left = test_root.left.as_ref().as_ref().unwrap();
+		assert_eq!(test_left.is_red(), true);
+		assert_eq!(test_left.key, 4);
+		assert_eq!(test_left.left.is_some(), false);
+		assert_eq!(test_left.right.is_some(), false);
+	}
+
+	#[test]
+	fn test_insert_case2_right() {
+		let start = Tree::new().insert(5, ()).unwrap();
+		let test = start.insert(6, ()).unwrap();
+		//  5
+		//   \
+		//    6
+		assert_eq!(test.root.is_some(), true);
+
+		let ref test_root = test.root.as_ref().as_ref().unwrap();
+		assert_eq!(test_root.is_red(), false);
+		assert_eq!(test_root.key, 5);
+		assert_eq!(test_root.left.is_some(), false);
+		assert_eq!(test_root.right.is_some(), true);
+
+		let ref test_right = test_root.right.as_ref().as_ref().unwrap();
+		assert_eq!(test_right.is_red(), true);
+		assert_eq!(test_right.key, 6);
+		assert_eq!(test_right.left.is_some(), false);
+		assert_eq!(test_right.right.is_some(), false);
+	}
+
+	#[test]
+	fn test_insert_case5_left() {
+		//      B
+		//     /
+		//    R
+		//   /
+		//  R
+		let start = Tree::new().insert(6, ()).unwrap().insert(5, ()).unwrap();
+		let test = start.insert(4, ()).unwrap();
+		//    5
+		//   / \
+		//  4   6
+		assert_eq!(test.root.is_some(), true);
+
+		let ref test_root = test.root.as_ref().as_ref().unwrap();
+		assert_eq!(test_root.is_red(), false);
+		assert_eq!(test_root.key, 5);
+		assert_eq!(test_root.left.is_some(), true);
+		assert_eq!(test_root.right.is_some(), true);
+
+		let ref test_left = test_root.left.as_ref().as_ref().unwrap();
+		assert_eq!(test_left.is_red(), true);
+		assert_eq!(test_left.key, 4);
+		assert_eq!(test_left.left.is_some(), false);
+		assert_eq!(test_left.right.is_some(), false);
+
+		let ref test_right = test_root.right.as_ref().as_ref().unwrap();
+		assert_eq!(test_right.is_red(), true);
+		assert_eq!(test_right.key, 6);
+		assert_eq!(test_right.left.is_some(), false);
+		assert_eq!(test_right.right.is_some(), false);
+	}
+
+	#[test]
+	fn test_insert_case5_right() {
+		//  B
+		//   \
+		//    R
+		//     \
+		//      R
+		let start = Tree::new().insert(4, ()).unwrap().insert(5, ()).unwrap();
+		let test = start.insert(6, ()).unwrap();
+		//    5
+		//   / \
+		//  4   6
+		assert_eq!(test.root.is_some(), true);
+
+		let ref test_root = test.root.as_ref().as_ref().unwrap();
+		assert_eq!(test_root.is_red(), false);
+		assert_eq!(test_root.key, 5);
+		assert_eq!(test_root.left.is_some(), true);
+		assert_eq!(test_root.right.is_some(), true);
+
+		let ref test_left = test_root.left.as_ref().as_ref().unwrap();
+		assert_eq!(test_left.is_red(), true);
+		assert_eq!(test_left.key, 4);
+		assert_eq!(test_left.left.is_some(), false);
+		assert_eq!(test_left.right.is_some(), false);
+
+		let ref test_right = test_root.right.as_ref().as_ref().unwrap();
+		assert_eq!(test_right.is_red(), true);
+		assert_eq!(test_right.key, 6);
+		assert_eq!(test_right.left.is_some(), false);
+		assert_eq!(test_right.right.is_some(), false);
+	}
+
+	#[test]
+	fn test_insert_case4_left() {
+		//    B
+		//   /
+		//  R
+		//   \
+		//    R
+		let start = Tree::new().insert(6, ()).unwrap().insert(4, ()).unwrap();
+		let test = start.insert(5, ()).unwrap();
+		//    5
+		//   / \
+		//  4   6
+		assert_eq!(test.root.is_some(), true);
+
+		let ref test_root = test.root.as_ref().as_ref().unwrap();
+		assert_eq!(test_root.is_red(), false);
+		assert_eq!(test_root.key, 5);
+		assert_eq!(test_root.left.is_some(), true);
+		assert_eq!(test_root.right.is_some(), true);
+
+		let ref test_left = test_root.left.as_ref().as_ref().unwrap();
+		assert_eq!(test_left.is_red(), true);
+		assert_eq!(test_left.key, 4);
+		assert_eq!(test_left.left.is_some(), false);
+		assert_eq!(test_left.right.is_some(), false);
+
+		let ref test_right = test_root.right.as_ref().as_ref().unwrap();
+		assert_eq!(test_right.is_red(), true);
+		assert_eq!(test_right.key, 6);
+		assert_eq!(test_right.left.is_some(), false);
+		assert_eq!(test_right.right.is_some(), false);
+	}
+
+	#[test]
+	fn test_insert_case4_right() {
+		//  B
+		//   \
+		//    R
+		//   /
+		//  R
+		let start = Tree::new().insert(4, ()).unwrap().insert(6, ()).unwrap();
+		let test = start.insert(5, ()).unwrap();
+		//    5
+		//   / \
+		//  4   6
+		assert_eq!(test.root.is_some(), true);
+
+		let ref test_root = test.root.as_ref().as_ref().unwrap();
+		assert_eq!(test_root.is_red(), false);
+		assert_eq!(test_root.key, 5);
+		assert_eq!(test_root.left.is_some(), true);
+		assert_eq!(test_root.right.is_some(), true);
+
+		let ref test_left = test_root.left.as_ref().as_ref().unwrap();
+		assert_eq!(test_left.is_red(), true);
+		assert_eq!(test_left.key, 4);
+		assert_eq!(test_left.left.is_some(), false);
+		assert_eq!(test_left.right.is_some(), false);
+
+		let ref test_right = test_root.right.as_ref().as_ref().unwrap();
+		assert_eq!(test_right.is_red(), true);
+		assert_eq!(test_right.key, 6);
+		assert_eq!(test_right.left.is_some(), false);
+		assert_eq!(test_right.right.is_some(), false);
+	}
+
+	#[test]
+	fn test_insert_case3_left_a() {
+		//      B
+		//     / \
+		//    R   R
+		//   /
+		//  R
+		let start = Tree::new().insert(5, ()).unwrap().insert(4, ()).unwrap().insert(6, ()).unwrap();
+		let test = start.insert(3, ()).unwrap();
+		//      5
+		//     / \
+		//    4   6
+		//   /
+		//  3
+		assert_eq!(test.root.is_some(), true);
+
+		let ref test_root = test.root.as_ref().as_ref().unwrap();
+		assert_eq!(test_root.is_red(), false);
+		assert_eq!(test_root.key, 5);
+		assert_eq!(test_root.left.is_some(), true);
+		assert_eq!(test_root.right.is_some(), true);
+
+		let ref test_left = test_root.left.as_ref().as_ref().unwrap();
+		assert_eq!(test_left.is_red(), false);
+		assert_eq!(test_left.key, 4);
+		assert_eq!(test_left.left.is_some(), true);
+		assert_eq!(test_left.right.is_some(), false);
+
+		let ref test_right = test_root.right.as_ref().as_ref().unwrap();
+		assert_eq!(test_right.is_red(), false);
+		assert_eq!(test_right.key, 6);
+		assert_eq!(test_right.left.is_some(), false);
+		assert_eq!(test_right.right.is_some(), false);
+
+		let ref test_left_left = test_left.left.as_ref().as_ref().unwrap();
+		assert_eq!(test_left_left.is_red(), true);
+		assert_eq!(test_left_left.key, 3);
+		assert_eq!(test_left_left.left.is_some(), false);
+		assert_eq!(test_left_left.right.is_some(), false);
+	}
+
+	#[test]
+	fn test_insert_case3_left_b() {
+		//    B
+		//   / \
+		//  R   R
+		//   \
+		//    R
+		let start = Tree::new().insert(5, ()).unwrap().insert(3, ()).unwrap().insert(6, ()).unwrap();
+		let test = start.insert(4, ()).unwrap();
+		//    5
+		//   / \
+		//  3   6
+		//   \
+		//    4
+		assert_eq!(test.root.is_some(), true);
+
+		let ref test_root = test.root.as_ref().as_ref().unwrap();
+		assert_eq!(test_root.is_red(), false);
+		assert_eq!(test_root.key, 5);
+		assert_eq!(test_root.left.is_some(), true);
+		assert_eq!(test_root.right.is_some(), true);
+
+		let ref test_left = test_root.left.as_ref().as_ref().unwrap();
+		assert_eq!(test_left.is_red(), false);
+		assert_eq!(test_left.key, 3);
+		assert_eq!(test_left.left.is_some(), false);
+		assert_eq!(test_left.right.is_some(), true);
+
+		let ref test_right = test_root.right.as_ref().as_ref().unwrap();
+		assert_eq!(test_right.is_red(), false);
+		assert_eq!(test_right.key, 6);
+		assert_eq!(test_right.left.is_some(), false);
+		assert_eq!(test_right.right.is_some(), false);
+
+		let ref test_left_right = test_left.right.as_ref().as_ref().unwrap();
+		assert_eq!(test_left_right.is_red(), true);
+		assert_eq!(test_left_right.key, 4);
+		assert_eq!(test_left_right.left.is_some(), false);
+		assert_eq!(test_left_right.right.is_some(), false);
+	}
+
+	#[test]
+	fn test_insert_case3_right_a() {
+		//    B
+		//   / \
+		//  R   R
+		//     /
+		//    R
+		let start = Tree::new().insert(5, ()).unwrap().insert(4, ()).unwrap().insert(7, ()).unwrap();
+		let test = start.insert(6, ()).unwrap();
+		//      5
+		//     / \
+		//    4   7
+		//       /
+		//      6
+		assert_eq!(test.root.is_some(), true);
+
+		let ref test_root = test.root.as_ref().as_ref().unwrap();
+		assert_eq!(test_root.is_red(), false);
+		assert_eq!(test_root.key, 5);
+		assert_eq!(test_root.left.is_some(), true);
+		assert_eq!(test_root.right.is_some(), true);
+
+		let ref test_left = test_root.left.as_ref().as_ref().unwrap();
+		assert_eq!(test_left.is_red(), false);
+		assert_eq!(test_left.key, 4);
+		assert_eq!(test_left.left.is_some(), false);
+		assert_eq!(test_left.right.is_some(), false);
+
+		let ref test_right = test_root.right.as_ref().as_ref().unwrap();
+		assert_eq!(test_right.is_red(), false);
+		assert_eq!(test_right.key, 7);
+		assert_eq!(test_right.left.is_some(), true);
+		assert_eq!(test_right.right.is_some(), false);
+
+		let ref test_right_left = test_right.left.as_ref().as_ref().unwrap();
+		assert_eq!(test_right_left.is_red(), true);
+		assert_eq!(test_right_left.key, 6);
+		assert_eq!(test_right_left.left.is_some(), false);
+		assert_eq!(test_right_left.right.is_some(), false);
+	}
+
+	#[test]
+	fn test_insert_case3_right_b() {
+		//    B
+		//   / \
+		//  R   R
+		//       \
+		//        R
+		let start = Tree::new().insert(5, ()).unwrap().insert(4, ()).unwrap().insert(6, ()).unwrap();
+		let test = start.insert(7, ()).unwrap();
+		//      5
+		//     / \
+		//    4   6
+		//         \
+		//          7
+		assert_eq!(test.root.is_some(), true);
+
+		let ref test_root = test.root.as_ref().as_ref().unwrap();
+		assert_eq!(test_root.is_red(), false);
+		assert_eq!(test_root.key, 5);
+		assert_eq!(test_root.left.is_some(), true);
+		assert_eq!(test_root.right.is_some(), true);
+
+		let ref test_left = test_root.left.as_ref().as_ref().unwrap();
+		assert_eq!(test_left.is_red(), false);
+		assert_eq!(test_left.key, 4);
+		assert_eq!(test_left.left.is_some(), false);
+		assert_eq!(test_left.right.is_some(), false);
+
+		let ref test_right = test_root.right.as_ref().as_ref().unwrap();
+		assert_eq!(test_right.is_red(), false);
+		assert_eq!(test_right.key, 6);
+		assert_eq!(test_right.left.is_some(), false);
+		assert_eq!(test_right.right.is_some(), true);
+
+		let ref test_right_right = test_right.right.as_ref().as_ref().unwrap();
+		assert_eq!(test_right_right.is_red(), true);
+		assert_eq!(test_right_right.key, 7);
+		assert_eq!(test_right_right.left.is_some(), false);
+		assert_eq!(test_right_right.right.is_some(), false);
 	}
 }
