@@ -222,7 +222,35 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 								}
 							},
 							InsertionResultRecursion::DoubleRedRight(right_grandchild) => {
-								unimplemented!()
+								assert!(!node.is_red());
+
+								if node.left.is_red() {
+									//   B (self)
+									//  / \
+									// R   R
+									//      \
+									//       R
+									
+									// recolour self and both children
+									let old_left = node.left.as_ref().as_ref().unwrap();
+									let old_right = node.right.as_ref().as_ref().unwrap();
+
+									let new_left = old_left.recolour(false, old_left.left.clone(), old_left.right.clone());
+									let new_right = old_right.recolour(false, old_right.left.clone(), right_grandchild);
+
+									InsertionResultRecursion::Standard(node.recolour(true, new_left, new_right))
+								} else {
+									//   B (self)
+									//  / \
+									// B   R
+									//      \
+									//       R
+									
+									// reorder and recolour
+									let old_right = node.right.as_ref().as_ref().unwrap();
+									let new_left = node.recolour(true, node.left.clone(), old_right.left.clone());
+									InsertionResultRecursion::Standard(old_right.recolour(false, new_left, right_grandchild))
+								}
 							}
 						}
 					},
