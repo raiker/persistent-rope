@@ -110,18 +110,8 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 			InsertionResultRecursion::Standard(root) => {
 				if root.is_red() {
 					//red
-					match root.as_ref() {
-						&Some(ref old_node) => {
-							Some(Tree {root: Rc::new(Some(TreeNode {
-								is_red: false,
-								key: old_node.key,
-								val: old_node.val,
-								left: old_node.left.clone(),
-								right: old_node.right.clone()
-							}))})
-						},
-						&None => panic!("assertion failure")
-					}
+					let old_node = root.as_ref().as_ref().unwrap();
+					Some(Tree {root: old_node.recolour(false, old_node.left.clone(), old_node.right.clone())})
 				} else {
 					//black
 					Some(Tree {root: root})
@@ -195,13 +185,7 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 									InsertionResultRecursion::DoubleRedRight(right_child)
 								} else {
 									//black
-									InsertionResultRecursion::Standard(Rc::new(Some(TreeNode{
-										is_red: node.is_red,
-										key: node.key,
-										val: node.val,
-										left: node.left.clone(),
-										right: right_child
-									})))
+									InsertionResultRecursion::Standard(node.recolour(node.is_red, node.left.clone(), right_child))
 								}
 							},
 							InsertionResultRecursion::DoubleRedLeft(left_grandchild) => {
@@ -218,29 +202,10 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 									let old_left = node.left.as_ref().as_ref().unwrap();
 									let old_right = node.right.as_ref().as_ref().unwrap();
 
-									let new_left = Rc::new(Some(TreeNode{
-										is_red: false,
-										key: old_left.key,
-										val: old_left.val,
-										left: old_left.left.clone(),
-										right: old_left.right.clone()
-									}));
+									let new_left = old_left.recolour(false, old_left.left.clone(), old_left.right.clone());
+									let new_right = old_right.recolour(false, left_grandchild, old_right.right.clone());
 
-									let new_right = Rc::new(Some(TreeNode{
-										is_red: false,
-										key: old_right.key,
-										val: old_right.val,
-										left: left_grandchild,
-										right: old_right.right.clone()
-									}));
-
-									InsertionResultRecursion::Standard(Rc::new(Some(TreeNode{
-										is_red: true,
-										key: node.key,
-										val: node.val,
-										left: new_left,
-										right: new_right
-									})))
+									InsertionResultRecursion::Standard(node.recolour(true, new_left, new_right))
 								} else {
 									//   B (self)
 									//  / \
