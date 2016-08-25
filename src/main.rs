@@ -1,7 +1,9 @@
 use std::rc::{Rc};
 use std::cmp::{Ord, Ordering};
 
-fn ptr_eq<T>(a: *const T, b: *const T) -> bool { a == b }
+mod rcstr;
+
+//fn ptr_eq<T>(a: *const T, b: *const T) -> bool { a == b }
 
 //Red-Black Tree
 
@@ -121,7 +123,7 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 		}
 	}
 
-	fn sibling<'a>(current: &'a Rc<Option<TreeNode<K,V>>>, parent: &'a Rc<Option<TreeNode<K,V>>>) -> &'a Rc<Option<TreeNode<K,V>>> {
+	/*fn sibling<'a>(current: &'a Rc<Option<TreeNode<K,V>>>, parent: &'a Rc<Option<TreeNode<K,V>>>) -> &'a Rc<Option<TreeNode<K,V>>> {
 		match parent.as_ref() {
 			&None => panic!("assertion failure"),
 			&Some(ref p) => {
@@ -134,7 +136,7 @@ impl<K,V> Tree<K,V> where K: Ord+Copy, V: Copy {
 				}
 			}
 		}
-	} 
+	}*/
 
 	fn rec_insert(key: K, val: V, current: &Rc<Option<TreeNode<K,V>>>, parent: Option<&Rc<Option<TreeNode<K,V>>>>) -> InsertionResultRecursion<K,V>{
 		match current.as_ref() {
